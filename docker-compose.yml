@@ -1,0 +1,74 @@
+version: ''3.8''
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: transformai-backend
+    restart: unless-stopped
+    ports:
+      - " 8000:8000\
+ environment:
+ - BACKEND_HOST=0.0.0.0
+ - BACKEND_PORT=8000
+ - DATABASE_URL=postgresql://transformai:transformai_secret@postgres:5432/transformai
+ - REDIS_URL=redis://redis:6379/0
+ - OPENAI_API_KEY=
+ depends_on:
+ postgres:
+ condition: service_healthy
+ redis:
+ condition: service_healthy
+
+ frontend:
+ build:
+ context: ./frontend
+ dockerfile: Dockerfile
+ args:
+ - NEXT_PUBLIC_API_URL=http://localhost:8000
+ container_name: transformai-frontend
+ restart: unless-stopped
+ ports:
+ - \3000:3000\
+ environment:
+ - BACKEND_URL=http://backend:8000
+ - NEXT_PUBLIC_API_URL=http://localhost:8000
+ depends_on:
+ - backend
+
+ postgres:
+ image: postgres:16-alpine
+ container_name: transformai-postgres
+ restart: unless-stopped
+ environment:
+ POSTGRES_USER: transformai
+ POSTGRES_PASSWORD: transformai_secret
+ POSTGRES_DB: transformai
+ ports:
+ - \5432:5432\
+ volumes:
+ - postgres_data:/var/lib/postgresql/data
+ healthcheck:
+ test: [\CMD-SHELL\, \pg_isready -U transformai -d transformai\]
+ interval: 5s
+ timeout: 5s
+ retries: 5
+
+ redis:
+ image: redis:7-alpine
+ container_name: transformai-redis
+ restart: unless-stopped
+ ports:
+ - \6379:6379\
+ volumes:
+ - redis_data:/data
+ healthcheck:
+ test: [\CMD\, \redis-cli\, \ping\]
+ interval: 5s
+ timeout: 5s
+ retries: 5
+
+volumes:
+ postgres_data:
+ redis_data:
