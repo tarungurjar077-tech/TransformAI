@@ -18,7 +18,7 @@ if current_dir not in sys.path:
 import uvicorn
 
 if __name__ == "__main__":
-    port = int(os.getenv("BACKEND_PORT", 8000))
+    port = int(os.getenv("PORT", os.getenv("BACKEND_PORT", 8000)))
     host = os.getenv("BACKEND_HOST", "0.0.0.0")
-    print(f"[TransformAI] Launching Backend on http://localhost:{port}")
+    print(f"[TransformAI] Launching Backend on http://{host}:{port}")
     uvicorn.run("backend.app.main:app", host=host, port=port, reload=True)

@@ -3,7 +3,7 @@ const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL ||
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  ...(process.env.DOCKER_BUILD === '1' ? { output: 'standalone' } : {}),
   async rewrites() {
     return [
       {
