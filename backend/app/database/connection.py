@@ -11,14 +11,14 @@ logging.basicConfig(level=logging.INFO)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://transformai:transformai_secret@localhost:5432/transformai"
+    "sqlite:///./transformai.db"
 )
 
 # In-memory or file-based SQLite fallback
 SQLITE_FALLBACK_URL = "sqlite:///./transformai.db"
 
 engine = None
-active_db_type = "postgresql"
+active_db_type = "sqlite"
 
 try:
     if DATABASE_URL.startswith("postgresql"):
