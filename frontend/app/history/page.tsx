@@ -17,7 +17,12 @@ import {
   Eye,
   X
 } from "lucide-react";
-import { fetchTransformations, fetchTransformation, deleteTransformation, getZipExportUrl } from "@/lib/api";
+import { 
+  fetchTransformations, 
+  fetchTransformation, 
+  deleteTransformation, 
+  downloadTransformationBundle 
+} from "@/lib/api";
 import { TransformationListItem, Transformation } from "@/types";
 import ResultsView from "@/components/ResultsView";
 
@@ -66,6 +71,15 @@ export default function HistoryPage() {
       alert("Failed to load details: " + err);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleDownload = async (id: number) => {
+    try {
+      const full = await fetchTransformation(id);
+      downloadTransformationBundle(full);
+    } catch (err) {
+      alert("Failed to download pack: " + err);
     }
   };
 
@@ -168,7 +182,10 @@ export default function HistoryPage() {
               <tbody className="divide-y divide-slate-200 dark:divide-slate-900/80 text-slate-700 dark:text-slate-300">
                 {filtered.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/40 transition-colors">
-                    <td className="py-4 px-6 font-medium text-slate-900 dark:text-white max-w-xs truncate">
+                    <td 
+                      onClick={() => handleViewDetail(item.id)}
+                      className="py-4 px-6 font-medium text-slate-900 dark:text-white max-w-xs truncate cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                    >
                       {item.title}
                     </td>
                     <td className="py-4 px-4 font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -193,18 +210,19 @@ export default function HistoryPage() {
                     <td className="py-4 px-6 text-right whitespace-nowrap space-x-2">
                       <button
                         onClick={() => handleViewDetail(item.id)}
-                        className="px-3 py-1.5 rounded-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 dark:bg-emerald-950 dark:hover:bg-emerald-900 dark:text-emerald-300 dark:border-emerald-800 text-xs font-medium transition-colors shadow-sm"
+                        className="px-3 py-1.5 rounded-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 dark:bg-emerald-950 dark:hover:bg-emerald-900 dark:text-emerald-300 dark:border-emerald-800 text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1"
                       >
-                        View Results
+                        <Eye className="w-3 h-3" />
+                        <span>View Results</span>
                       </button>
 
-                      <a
-                        href={getZipExportUrl(item.id)}
+                      <button
+                        onClick={() => handleDownload(item.id)}
                         className="p-1.5 inline-block rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-300 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-300 dark:hover:text-white dark:border-slate-800 transition-colors align-middle shadow-sm"
-                        title="Download ZIP Pack"
+                        title="Download Deliverable Pack"
                       >
-                        <Archive className="w-3.5 h-3.5" />
-                      </a>
+                        <Download className="w-3.5 h-3.5" />
+                      </button>
 
                       <button
                         onClick={() => handleDelete(item.id)}

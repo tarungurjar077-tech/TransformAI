@@ -7,6 +7,14 @@ import {
   HealthStatus
 } from "@/types";
 import { buildCompleteTransformation } from "./generator";
+import {
+  getStoredTransformations,
+  getStoredTransformationListItems,
+  getStoredTransformationById,
+  saveTransformationToStorage,
+  deleteStoredTransformation,
+  triggerClientDownloadBundle
+} from "./storage";
 
 function getApiBase(): string {
   if (typeof window !== "undefined") {
@@ -61,7 +69,6 @@ export async function fetchFormats(): Promise<FormatMetadata[]> {
         if (localRes.ok) return await localRes.json();
       } catch {}
     }
-    // Fallback format metadata
     return [
       { id: "executive_summary", name: "Executive Summary", description: "Strategic C-suite briefing with contextual background, risk assessment, and actionable next steps.", icon: "Briefcase", category: "Leadership" },
       { id: "security_advisory", name: "Security Advisory", description: "Technical cybersecurity alert with vulnerability analysis, impact scope, IoCs, and urgent containment protocol.", icon: "ShieldAlert", category: "Technical" },
@@ -88,11 +95,8 @@ export async function uploadFile(file: File): Promise<DocumentUploadResult> {
       body: formData,
     });
     if (res.ok) return await res.json();
-  } catch (e) {
-    // If external backend fails, parse text client-side
-  }
+  } catch (e) {}
 
-  // Client-side text/markdown extraction fallback
   const text = await file.text();
   const words = text.trim().split(/\s+/).length;
   const chars = text.length;
@@ -123,6 +127,7 @@ export interface TransformPayload {
 
 export async function runTransformation(payload: TransformPayload): Promise<Transformation> {
   const base = getApiBase();
+  let result: Transformation | null = null;
 
   // Try Primary Target (configured backend or localhost)
   if (base) {
@@ -134,65 +139,126 @@ export async function runTransformation(payload: TransformPayload): Promise<Tran
       });
 
       if (res.ok) {
-        return await res.json();
+        result = await res.json();
       }
-      console.warn(`[TransformAI] Primary backend returned status ${res.status}. Falling back to internal engine...`);
     } catch (err) {
-      console.warn("[TransformAI] Primary backend unreachable. Engaging autonomous fallback pipeline...", err);
+      console.warn("[TransformAI] Primary backend unreachable. Engaging fallback...", err);
     }
   }
 
   // Fallback 1: Internal Next.js Route Handler (/api/transform)
-  try {
-    const res = await fetch("/api/transform", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+  if (!result) {
+    try {
+      const res = await fetch("/api/transform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-    if (res.ok) {
-      return await res.json();
+      if (res.ok) {
+        result = await res.json();
+      }
+    } catch (err) {
+      console.warn("[TransformAI] Next.js route unreachable. Engaging direct generator...", err);
     }
-  } catch (err) {
-    console.warn("[TransformAI] Next.js route unreachable. Engaging direct client generator...", err);
   }
 
   // Fallback 2: Direct In-Browser Autonomous Content Engine
-  return buildCompleteTransformation({
-    content: payload.content,
-    source_type: payload.source_type || "text",
-    selected_outputs: payload.selected_outputs,
-    audience: payload.audience || "Executive",
-    tone: payload.tone || "Professional",
-    language: payload.language || "English",
-    detail_level: payload.detail_level || "Detailed",
-    custom_instructions: payload.custom_instructions
-  });
+  if (!result) {
+    result = buildCompleteTransformation({
+      content: payload.content,
+      source_type: payload.source_type || "text",
+      selected_outputs: payload.selected_outputs,
+      audience: payload.audience || "Executive",
+      tone: payload.tone || "Professional",
+      language: payload.language || "English",
+      detail_level: payload.detail_level || "Detailed",
+      custom_instructions: payload.custom_instructions
+    });
+  }
+
+  // Persist result into client storage & server memory
+  saveTransformationToStorage(result);
+
+  // Background sync with /api/transformations
+  try {
+    fetch("/api/transformations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result)
+    }).catch(() => {});
+  } catch {}
+
+  return result;
 }
 
 export async function fetchTransformations(): Promise<TransformationListItem[]> {
   const base = getApiBase();
+  
+  if (base) {
+    try {
+      const res = await fetch(`${base}/api/transformations`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data;
+        }
+      }
+    } catch {}
+  }
+
   try {
-    const res = await fetch(`${base}/api/transformations`, { cache: "no-store" });
-    if (res.ok) return await res.json();
+    const res = await fetch("/api/transformations", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
   } catch {}
-  return [];
+
+  // Local storage fallback with seed data
+  return getStoredTransformationListItems();
 }
 
 export async function fetchTransformation(id: number): Promise<Transformation> {
   const base = getApiBase();
+
+  if (base) {
+    try {
+      const res = await fetch(`${base}/api/transformations/${id}`, { cache: "no-store" });
+      if (res.ok) return await res.json();
+    } catch {}
+  }
+
   try {
-    const res = await fetch(`${base}/api/transformations/${id}`, { cache: "no-store" });
+    const res = await fetch(`/api/transformations/${id}`, { cache: "no-store" });
     if (res.ok) return await res.json();
   } catch {}
-  throw new Error(`Transformation #${id} not found`);
+
+  // Local storage lookup
+  const localItem = getStoredTransformationById(id);
+  if (localItem) {
+    return localItem;
+  }
+
+  throw new Error(`Transformation #${id} not found.`);
 }
 
 export async function deleteTransformation(id: number): Promise<void> {
   const base = getApiBase();
+
+  if (base) {
+    try {
+      await fetch(`${base}/api/transformations/${id}`, { method: "DELETE" });
+    } catch {}
+  }
+
   try {
-    await fetch(`${base}/api/transformations/${id}`, { method: "DELETE" });
+    await fetch(`/api/transformations/${id}`, { method: "DELETE" });
   } catch {}
+
+  deleteStoredTransformation(id);
 }
 
 export async function regenerateOutput(
@@ -201,28 +267,61 @@ export async function regenerateOutput(
   options?: { audience?: string; tone?: string; language?: string; custom_instructions?: string }
 ) {
   const base = getApiBase();
-  try {
-    const res = await fetch(`${base}/api/transformations/${transformationId}/regenerate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        format_type: formatType,
-        ...options,
-      }),
-    });
-    if (res.ok) return await res.json();
-  } catch {}
+  let regeneratedOutput = null;
 
-  // Fallback regeneration
-  const singleTransform = buildCompleteTransformation({
-    content: "Regenerated content",
-    selected_outputs: [formatType],
-    audience: options?.audience,
-    tone: options?.tone,
-    language: options?.language,
-    custom_instructions: options?.custom_instructions
-  });
-  return singleTransform.outputs[0];
+  if (base) {
+    try {
+      const res = await fetch(`${base}/api/transformations/${transformationId}/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format_type: formatType,
+          ...options,
+        }),
+      });
+      if (res.ok) regeneratedOutput = await res.json();
+    } catch {}
+  }
+
+  if (!regeneratedOutput) {
+    try {
+      const res = await fetch(`/api/transformations/${transformationId}/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format_type: formatType,
+          ...options,
+        }),
+      });
+      if (res.ok) regeneratedOutput = await res.json();
+    } catch {}
+  }
+
+  if (!regeneratedOutput) {
+    const singleTransform = buildCompleteTransformation({
+      content: options?.custom_instructions ? `Regenerated: ${options.custom_instructions}` : "Regenerated analysis briefing",
+      selected_outputs: [formatType],
+      audience: options?.audience,
+      tone: options?.tone,
+      language: options?.language,
+      custom_instructions: options?.custom_instructions
+    });
+    regeneratedOutput = singleTransform.outputs[0];
+  }
+
+  // Update in stored transformation
+  const current = getStoredTransformationById(transformationId);
+  if (current) {
+    const existingIdx = current.outputs.findIndex(o => o.format_type === formatType);
+    if (existingIdx >= 0) {
+      current.outputs[existingIdx] = regeneratedOutput;
+    } else {
+      current.outputs.push(regeneratedOutput);
+    }
+    saveTransformationToStorage(current);
+  }
+
+  return regeneratedOutput;
 }
 
 export async function fetchTemplates(): Promise<TemplateItem[]> {
@@ -264,5 +363,12 @@ export async function fetchCybersecuritySample(): Promise<{
 
 export function getZipExportUrl(transformationId: number): string {
   const base = getApiBase();
-  return `${base}/api/transformations/${transformationId}/export-zip`;
+  if (base) {
+    return `${base}/api/transformations/${transformationId}/export-zip`;
+  }
+  return `/api/transformations/${transformationId}/export-zip`;
+}
+
+export function downloadTransformationBundle(transformation: Transformation): void {
+  triggerClientDownloadBundle(transformation);
 }
